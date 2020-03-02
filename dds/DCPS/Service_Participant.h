@@ -19,6 +19,8 @@
 #include "dds/DCPS/DomainParticipantFactoryImpl.h"
 #include "dds/DCPS/unique_ptr.h"
 #include "dds/DCPS/ReactorTask.h"
+#include "dds/DCPS/NetworkConfigMonitor.h"
+#include "dds/DCPS/NetworkConfigModifier.h"
 
 #include "ace/Task.h"
 #include "ace/Configuration.h"
@@ -28,6 +30,7 @@
 
 #include "Recorder.h"
 #include "Replayer.h"
+
 #include <memory>
 
 #if !defined (ACE_LACKS_PRAGMA_ONCE)
@@ -45,6 +48,12 @@ class DataDurabilityCache;
 class Monitor;
 
 const char DEFAULT_ORB_NAME[] = "OpenDDS_DCPS";
+
+class ShutdownListener {
+public:
+  virtual ~ShutdownListener() {}
+  virtual void notify_shutdown() = 0;
+};
 
 /**
  * @class Service_Participant
@@ -78,6 +87,8 @@ public:
   ACE_Reactor* reactor();
 
   ACE_thread_t reactor_owner() const;
+
+  void set_shutdown_listener(ShutdownListener* listener);
 
   /**
    * Initialize the DDS client environment and get the
@@ -386,6 +397,18 @@ public:
   void configure_pool();
 #endif
 
+  /**
+   * Set a configuration file to use if -DCPSConfigFile wasn't passed to
+   * TheParticipantFactoryWithArgs. Must be used before
+   * TheParticipantFactory*() functions are called.
+   */
+  void default_configuration_file(const ACE_TCHAR* path);
+
+#ifdef OPENDDS_NETWORK_CONFIG_MODIFIER
+  NetworkConfigModifier* network_config_modifier();
+#endif
+  NetworkConfigMonitor_rch network_config_monitor();
+
 private:
 
   /// Initialize default qos.
@@ -604,17 +627,28 @@ private:
   /// Used to track state of service participant
   bool shut_down_;
 
+  ShutdownListener* shutdown_listener_;
+
   /// Guard access to the internal maps.
   ACE_Recursive_Thread_Mutex maps_lock_;
 
   static int zero_argc;
+
+  /**
+   * If set before TheParticipantFactoryWithArgs and -DCPSConfigFile is not
+   * passed, use this as the configuration file.
+   */
+  ACE_TString default_configuration_file_;
+
+  NetworkConfigMonitor_rch network_config_monitor_;
+  mutable ACE_Thread_Mutex network_config_monitor_lock_;
 };
 
-#   define TheServiceParticipant OpenDDS::DCPS::Service_Participant::instance()
+#define TheServiceParticipant OpenDDS::DCPS::Service_Participant::instance()
 
-#   define TheParticipantFactory TheServiceParticipant->get_domain_participant_factory()
+#define TheParticipantFactory TheServiceParticipant->get_domain_participant_factory()
 
-#   define TheParticipantFactoryWithArgs(argc, argv) TheServiceParticipant->get_domain_participant_factory(argc, argv)
+#define TheParticipantFactoryWithArgs(argc, argv) TheServiceParticipant->get_domain_participant_factory(argc, argv)
 
 } // namespace DCPS
 } // namespace OpenDDS

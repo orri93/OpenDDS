@@ -5,11 +5,9 @@
 namespace RtpsRelay {
 
 SubscriptionListener::SubscriptionListener(OpenDDS::DCPS::DomainParticipantImpl* participant,
-                                           ReaderEntryDataWriter_ptr writer,
-                                           const AssociationTable& association_table) :
-  participant_(participant),
-  writer_(writer),
-  association_table_(association_table)
+                                           ReaderEntryDataWriter_ptr writer)
+  : participant_(participant)
+  , writer_(writer)
 {}
 
 void SubscriptionListener::on_data_available(DDS::DataReader_ptr reader)
@@ -33,14 +31,14 @@ void SubscriptionListener::on_data_available(DDS::DataReader_ptr reader)
     return;
   }
 
-  for (size_t idx = 0; idx != infos.length(); ++idx) {
+  for (CORBA::ULong idx = 0; idx != infos.length(); ++idx) {
     switch (infos[idx].instance_state) {
     case DDS::ALIVE_INSTANCE_STATE:
       write_sample(data[idx], infos[idx]);
       break;
     case DDS::NOT_ALIVE_DISPOSED_INSTANCE_STATE:
     case DDS::NOT_ALIVE_NO_WRITERS_INSTANCE_STATE:
-      write_dispose(infos[idx]);
+      unregister_instance(infos[idx]);
       break;
     }
   }
@@ -49,9 +47,8 @@ void SubscriptionListener::on_data_available(DDS::DataReader_ptr reader)
 void SubscriptionListener::write_sample(const DDS::SubscriptionBuiltinTopicData& data,
                                         const DDS::SampleInfo& info)
 {
-  const OpenDDS::DCPS::RepoId id = participant_->get_repoid(info.instance_handle);
   GUID_t guid;
-  std::memcpy(&guid, &id, sizeof(GUID_t));
+  assign(guid, participant_->get_repoid(info.instance_handle));
 
   DDS::DataReaderQos data_reader_qos;
   data_reader_qos.durability = data.durability;
@@ -80,8 +77,6 @@ void SubscriptionListener::write_sample(const DDS::SubscriptionBuiltinTopicData&
     data.type_name.in(),
     data_reader_qos,
     subscriber_qos,
-
-    association_table_.local_relay_addresses()
   };
 
   DDS::ReturnCode_t ret = writer_->write(entry, DDS::HANDLE_NIL);
@@ -90,18 +85,17 @@ void SubscriptionListener::write_sample(const DDS::SubscriptionBuiltinTopicData&
   }
 }
 
-void SubscriptionListener::write_dispose(const DDS::SampleInfo& info)
+void SubscriptionListener::unregister_instance(const DDS::SampleInfo& info)
 {
-  const OpenDDS::DCPS::RepoId id = participant_->get_repoid(info.instance_handle);
   GUID_t guid;
-  std::memcpy(&guid, &id, sizeof(GUID_t));
+  assign(guid, participant_->get_repoid(info.instance_handle));
 
   ReaderEntry entry;
   entry.guid(guid);
 
-  DDS::ReturnCode_t ret = writer_->dispose(entry, DDS::HANDLE_NIL);
+  DDS::ReturnCode_t ret = writer_->unregister_instance(entry, DDS::HANDLE_NIL);
   if (ret != DDS::RETCODE_OK) {
-    ACE_ERROR((LM_ERROR, "(%P|%t) %N:%l ERROR: SubscriptionListener::write_dispose failed to dispose\n"));
+    ACE_ERROR((LM_ERROR, "(%P|%t) %N:%l ERROR: SubscriptionListener::unregister_instance failed to unregister_instance\n"));
   }
 }
 

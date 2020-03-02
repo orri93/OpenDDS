@@ -847,7 +847,7 @@ namespace {
   // specified and returns the AST_Type associated with that key.
   // Because the key name can contain indexed arrays and nested
   // structures, things can get interesting.
-  AST_Type* find_type(const std::vector<AST_Field*>& fields, const string& key)
+  AST_Type* find_type(AST_Structure* struct_node, const string& key)
   {
     string key_base = key;   // the field we are looking for here
     string key_rem;          // the sub-field we will look for recursively
@@ -867,10 +867,13 @@ namespace {
         key_rem = key.substr(pos+1);
       }
     }
-    for (size_t i = 0; i < fields.size(); ++i) {
-      string field_name = fields[i]->local_name()->get_string();
-      if (field_name == key_base) {
-        AST_Type* field_type = fields[i]->field_type();
+
+    const Fields fields(struct_node);
+    const Fields::Iterator fields_end = fields.end();
+    for (Fields::Iterator i = fields.begin(); i != fields_end; ++i) {
+      AST_Field* field = *i;
+      if (key_base == field->local_name()->get_string()) {
+        AST_Type* field_type = resolveActualType(field->field_type());
         if (!is_array && key_rem.empty()) {
           // The requested key field matches this one.  We do not allow
           // arrays (must be indexed specifically) or structs (must
@@ -879,23 +882,14 @@ namespace {
           if (sub_struct != 0) {
             throw string("Structs not allowed as keys");
           }
-          AST_Typedef* typedef_node = dynamic_cast<AST_Typedef*>(field_type);
-          if (typedef_node != 0) {
-            AST_Array* array_node =
-              dynamic_cast<AST_Array*>(typedef_node->base_type());
-            if (array_node != 0) {
-              throw string("Arrays not allowed as keys");
-            }
+          AST_Array* array_node = dynamic_cast<AST_Array*>(field_type);
+          if (array_node != 0) {
+            throw string("Arrays not allowed as keys");
           }
           return field_type;
         } else if (is_array) {
           // must be a typedef of an array
-          AST_Typedef* typedef_node = dynamic_cast<AST_Typedef*>(field_type);
-          if (typedef_node == 0) {
-            throw string("Indexing for non-array type");
-          }
-          AST_Array* array_node =
-            dynamic_cast<AST_Array*>(typedef_node->base_type());
+          AST_Array* array_node = dynamic_cast<AST_Array*>(field_type);
           if (array_node == 0) {
             throw string("Indexing for non-array type");
           }
@@ -922,17 +916,9 @@ namespace {
         if (sub_struct == 0) {
           throw string("Expected structure field for ") + key_base;
         }
-        size_t nfields = sub_struct->nfields();
-        std::vector<AST_Field*> sub_fields;
-        sub_fields.reserve(nfields);
 
-        for (unsigned long i = 0; i < nfields; ++i) {
-          AST_Field** f;
-          sub_struct->field(f, i);
-          sub_fields.push_back(*f);
-        }
         // find type of nested struct field
-        return find_type(sub_fields, key_rem);
+        return find_type(sub_struct, key_rem);
       }
     }
     throw string("Field not found.");
@@ -952,11 +938,10 @@ namespace {
     if ((fld_cls & CL_STRING) && !(fld_cls & CL_BOUNDED)) {
       bounded = false;
     } else if (fld_cls & CL_STRUCTURE) {
-      AST_Structure* struct_node = dynamic_cast<AST_Structure*>(type);
-      for (unsigned long i = 0; i < struct_node->nfields(); ++i) {
-        AST_Field** f;
-        struct_node->field(f, i);
-        if (!is_bounded_type((*f)->field_type())) {
+      const Fields fields(dynamic_cast<AST_Structure*>(type));
+      const Fields::Iterator fields_end = fields.end();
+      for (Fields::Iterator i = fields.begin(); i != fields_end; ++i) {
+        if (!is_bounded_type((*i)->field_type())) {
           bounded = false;
           break;
         }
@@ -972,11 +957,10 @@ namespace {
       AST_Array* array_node = dynamic_cast<AST_Array*>(type);
       if (!is_bounded_type(array_node->base_type())) bounded = false;
     } else if (fld_cls & CL_UNION) {
-      AST_Union* union_node = dynamic_cast<AST_Union*>(type);
-      for (unsigned long i = 0; i < union_node->nfields(); ++i) {
-        AST_Field** f;
-        union_node->field(f, i);
-        if (!is_bounded_type((*f)->field_type())) {
+      const Fields fields(dynamic_cast<AST_Union*>(type));
+      const Fields::Iterator fields_end = fields.end();
+      for (Fields::Iterator i = fields.begin(); i != fields_end; ++i) {
+        if (!is_bounded_type((*i)->field_type())) {
           bounded = false;
           break;
         }
@@ -1072,12 +1056,10 @@ namespace {
       break;
     }
     case AST_Decl::NT_struct: {
-      AST_Structure* struct_node = dynamic_cast<AST_Structure*>(type);
-      for (unsigned long i = 0; i < struct_node->nfields(); ++i) {
-        AST_Field** f;
-        struct_node->field(f, i);
-        AST_Type* field_type = (*f)->field_type();
-        max_marshaled_size(field_type, size, padding);
+      const Fields fields(dynamic_cast<AST_Structure*>(type));
+      const Fields::Iterator fields_end = fields.end();
+      for (Fields::Iterator i = fields.begin(); i != fields_end; ++i) {
+        max_marshaled_size((*i)->field_type(), size, padding);
       }
       break;
     }
@@ -1106,11 +1088,10 @@ namespace {
       max_marshaled_size(union_node->disc_type(), size, padding);
       size_t largest_field_size = 0, largest_field_pad = 0;
       const size_t starting_size = size, starting_pad = padding;
-      for (unsigned long i = 0; i < union_node->nfields(); ++i) {
-        AST_Field** f;
-        union_node->field(f, i);
-        AST_Type* field_type = (*f)->field_type();
-        max_marshaled_size(field_type, size, padding);
+      const Fields fields(union_node);
+      const Fields::Iterator fields_end = fields.end();
+      for (Fields::Iterator i = fields.begin(); i != fields_end; ++i) {
+        max_marshaled_size((*i)->field_type(), size, padding);
         size_t field_size = size - starting_size,
           field_pad = padding - starting_pad;
         if (field_size > largest_field_size) {
@@ -1586,9 +1567,9 @@ namespace {
 
   bool
   iterate_over_keys(
+    AST_Structure* node,
     const std::string& struct_name,
     IDL_GlobalData::DCPS_Data_Type_Info* info,
-    const std::vector<AST_Field*>& fields,
     TopicKeys& keys,
     KeyIterationFn fn,
     size_t* size, size_t* padding,
@@ -1619,7 +1600,7 @@ namespace {
         const string key_name = ACE_TEXT_ALWAYS_CHAR(kp->c_str());
         AST_Type* field_type = 0;
         try {
-          field_type = find_type(fields, key_name);
+          field_type = find_type(node, key_name);
         } catch (const string& error) {
           std::cerr << "ERROR: Invalid key specification for " << struct_name
                     << " (" << key_name << "). " << error << std::endl;
@@ -1781,7 +1762,7 @@ bool marshal_generator::gen_struct(AST_Structure* node,
         string key_name = ACE_TEXT_ALWAYS_CHAR(kp->c_str());
         AST_Type* field_type = 0;
         try {
-          field_type = find_type(fields, key_name);
+          field_type = find_type(node, key_name);
         } catch (const string& error) {
           std::cerr << "ERROR: Invalid key specification for " << cxx
                     << " (" << key_name << "). " << error << std::endl;
@@ -1811,7 +1792,7 @@ bool marshal_generator::gen_struct(AST_Structure* node,
       if (bounded_key) {  // Only generate a size if the key is bounded
         size_t size = 0, padding = 0;
 
-        if (!iterate_over_keys(cxx, info, fields, keys,
+        if (!iterate_over_keys(node, cxx, info, keys,
           gen_max_marshaled_size_iteration, &size, &padding, 0, 0)) {
           return false;
         }
@@ -1837,7 +1818,7 @@ bool marshal_generator::gen_struct(AST_Structure* node,
       find_size.endArgs();
       string expr, intro;
 
-      if (!iterate_over_keys(cxx, info, fields, keys,
+      if (!iterate_over_keys(node, cxx, info, keys,
         gen_find_size_iteration, 0, 0, &expr, &intro)) {
         return false;
       }
@@ -1860,7 +1841,7 @@ bool marshal_generator::gen_struct(AST_Structure* node,
           string key_name = ACE_TEXT_ALWAYS_CHAR(kp->c_str());
           AST_Type* field_type = 0;
           try {
-            field_type = find_type(fields, key_name);
+            field_type = find_type(node, key_name);
           } catch (const string& error) {
             std::cerr << "ERROR: Invalid key specification for " << cxx
                       << " (" << key_name << "). " << error << std::endl;
@@ -1925,7 +1906,7 @@ bool marshal_generator::gen_struct(AST_Structure* node,
           string key_name = ACE_TEXT_ALWAYS_CHAR(kp->c_str());
           AST_Type* field_type = 0;
           try {
-            field_type = find_type(fields, key_name);
+            field_type = find_type(node, key_name);
           } catch (const string& error) {
             std::cerr << "ERROR: Invalid key specification for " << cxx
                       << " (" << key_name << "). " << error << std::endl;

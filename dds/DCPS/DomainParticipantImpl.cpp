@@ -111,13 +111,12 @@ DomainParticipantImpl::DomainParticipantImpl(
     federated_(false),
     shutdown_condition_(shutdown_mutex_),
     shutdown_complete_(false),
-    monitor_(0),
     pub_id_gen_(dp_id_),
     automatic_liveliness_timer_(*this),
     participant_liveliness_timer_(*this)
 {
   (void) this->set_listener(a_listener, mask);
-  monitor_ = TheServiceParticipant->monitor_factory_->create_dp_monitor(this);
+  monitor_.reset(TheServiceParticipant->monitor_factory_->create_dp_monitor(this));
 }
 
 DomainParticipantImpl::~DomainParticipantImpl()
@@ -152,7 +151,7 @@ DomainParticipantImpl::create_publisher(
   DDS::Publisher_ptr pub_obj(pub);
 
   // this object will also act as the guard for leaking Publisher Impl
-  Publisher_Pair pair(pub, pub_obj, NO_DUP);
+  Publisher_Pair pair(pub, pub_obj, false);
 
   ACE_GUARD_RETURN(ACE_Recursive_Thread_Mutex,
                    tao_mon,
@@ -200,7 +199,7 @@ DomainParticipantImpl::delete_publisher(
                    this->publishers_protector_,
                    DDS::RETCODE_ERROR);
 
-  Publisher_Pair pair(the_servant, p, DUP);
+  Publisher_Pair pair(the_servant, p, true);
 
   if (OpenDDS::DCPS::remove(publishers_, pair) == -1) {
     ACE_ERROR((LM_ERROR,
@@ -241,7 +240,7 @@ DomainParticipantImpl::create_subscriber(
 
   DDS::Subscriber_ptr sub_obj(sub);
 
-  Subscriber_Pair pair(sub, sub_obj, NO_DUP);
+  Subscriber_Pair pair(sub, sub_obj, false);
 
   ACE_GUARD_RETURN(ACE_Recursive_Thread_Mutex,
                    tao_mon,
@@ -300,7 +299,7 @@ DomainParticipantImpl::delete_subscriber(
                    this->subscribers_protector_,
                    DDS::RETCODE_ERROR);
 
-  Subscriber_Pair pair(the_servant, s, DUP);
+  Subscriber_Pair pair(the_servant, s, true);
 
   if (OpenDDS::DCPS::remove(subscribers_, pair) == -1) {
     ACE_ERROR((LM_ERROR,
@@ -469,11 +468,11 @@ DomainParticipantImpl::create_topic_i(
       type_support = Registered_Data_Types->lookup(this, type_name);
       if (CORBA::is_nil(type_support)) {
         if (DCPS_debug_level >= 1) {
-            ACE_ERROR((LM_ERROR, ACE_TEXT("(%P|%t) ERROR: ")
-                       ACE_TEXT("DomainParticipantImpl::create_topic, ")
-                       ACE_TEXT("can't create a topic=%C type_name=%C ")
-                       ACE_TEXT("is not registered.\n"),
-                       topic_name, type_name));
+           ACE_ERROR((LM_ERROR, ACE_TEXT("(%P|%t) ERROR: ")
+                      ACE_TEXT("DomainParticipantImpl::create_topic, ")
+                      ACE_TEXT("can't create a topic=%C type_name=%C ")
+                      ACE_TEXT("is not registered.\n"),
+                      topic_name, type_name));
         }
         return DDS::Topic::_nil();
       }
@@ -485,14 +484,22 @@ DomainParticipantImpl::create_topic_i(
                                                 a_listener,
                                                 mask,
                                                 type_support);
+
+    if (!new_topic) {
+       ACE_ERROR((LM_WARNING,
+                  ACE_TEXT("(%P|%t) WARNING: ")
+                  ACE_TEXT("DomainParticipantImpl::create_topic, ")
+                  ACE_TEXT("create_new_topic failed.\n")));
+        return DDS::Topic::_nil();
+    }
+
     if ((this->enabled_ == true) && qos_.entity_factory.autoenable_created_entities) {
       if (new_topic->enable() != DDS::RETCODE_OK) {
-        ACE_ERROR((LM_WARNING,
-                   ACE_TEXT("(%P|%t) WARNING: ")
-                   ACE_TEXT("DomainParticipantImpl::create_topic, ")
-                   ACE_TEXT("enable failed.\n")));
+         ACE_ERROR((LM_WARNING,
+                    ACE_TEXT("(%P|%t) WARNING: ")
+                    ACE_TEXT("DomainParticipantImpl::create_topic, ")
+                    ACE_TEXT("enable failed.\n")));
         return DDS::Topic::_nil();
-
       }
     }
     return new_topic._retn();
@@ -1903,7 +1910,7 @@ DomainParticipantImpl::create_new_topic(
   DDS::Topic_ptr obj(topic_servant);
 
   // this object will also act as a guard against leaking the new TopicImpl
-  RefCounted_Topic refCounted_topic(Topic_Pair(topic_servant, obj, NO_DUP));
+  RefCounted_Topic refCounted_topic(Topic_Pair(topic_servant, obj, false));
 
   if (OpenDDS::DCPS::bind(topics_, topic_name, refCounted_topic) == -1) {
     ACE_ERROR((LM_ERROR,
@@ -1926,14 +1933,18 @@ bool
 DomainParticipantImpl::is_clean() const
 {
   bool sub_is_clean = subscribers_.empty();
-  bool topics_is_clean = topics_.size() == 0;
+  bool topics_is_clean = true;
+
+  // check that the only remaining topics are built-in topics
+  for (TopicMap::const_iterator it = topics_.begin(); it != topics_.end(); ++it) {
+    if (!topicIsBIT(it->second.pair_.svt_->topic_name(), it->second.pair_.svt_->type_name())) {
+      topics_is_clean = false;
+    }
+  }
 
   if (!TheTransientKludge->is_enabled()) {
-    // There are four topics and builtin topic subscribers
-    // left.
-
+    // There are built-in topics and built-in topic subscribers left.
     sub_is_clean = !sub_is_clean ? subscribers_.size() == 1 : true;
-    topics_is_clean = !topics_is_clean ? topics_.size() == 4 : true;
   }
   return (publishers_.empty()
           && sub_is_clean

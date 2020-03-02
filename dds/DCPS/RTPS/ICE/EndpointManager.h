@@ -5,6 +5,7 @@
  * See: http://www.opendds.org/license.html
  */
 
+#ifdef OPENDDS_SECURITY
 #ifndef OPENDDS_RTPS_ICE_ENDPOINT_MANAGER_H
 #define OPENDDS_RTPS_ICE_ENDPOINT_MANAGER_H
 
@@ -129,6 +130,8 @@ struct EndpointManager {
     username_to_checklist_.erase(pos);
   }
 
+  void unfreeze();
+
   void unfreeze(const FoundationType& a_foundation);
 
   void compute_active_foundations(ActiveFoundationSet& a_active_foundations) const;
@@ -136,6 +139,20 @@ struct EndpointManager {
   void check_invariants() const;
 
   void schedule_for_destruction();
+
+  void ice_connect(const GuidSetType& guids, const ACE_INET_Addr& addr)
+  {
+    endpoint->ice_connect(guids, addr);
+  }
+
+  void ice_disconnect(const GuidSetType& guids)
+  {
+    endpoint->ice_disconnect(guids);
+  }
+
+  void network_change();
+
+  void send(const ACE_INET_Addr& address, const STUN::Message& message);
 
 private:
   bool scheduled_for_destruction_;
@@ -202,7 +219,9 @@ private:
                const ACE_INET_Addr& a_remote_address,
                const STUN::Message& a_message);
 
-  void indication(const STUN::Message& a_message);
+  void indication(const ACE_INET_Addr& a_local_address,
+                  const ACE_INET_Addr& a_remote_address,
+                  const STUN::Message& a_message);
 
   void success_response(const ACE_INET_Addr& a_local_address,
                         const ACE_INET_Addr& a_remote_address,
@@ -231,3 +250,4 @@ private:
 OPENDDS_END_VERSIONED_NAMESPACE_DECL
 
 #endif /* OPENDDS_RTPS_ICE_ENDPOINT_MANAGER_H */
+#endif /* OPENDDS_SECURITY */

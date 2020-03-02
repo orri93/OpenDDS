@@ -22,6 +22,10 @@ OPENDDS_BEGIN_VERSIONED_NAMESPACE_DECL
 namespace OpenDDS {
 namespace DCPS {
 
+OpenDDS_Dcps_Export
+bool
+is_wildcard(const char *str);
+
 /// Increments the count of occurances of the incompatible policy
 ///  for the status
 OpenDDS_Dcps_Export
@@ -45,15 +49,15 @@ OpenDDS_Dcps_Export
 bool
 compatibleQOS(const DDS::DataWriterQos * writerQos,
               const DDS::DataReaderQos * readerQos,
-              OpenDDS::DCPS::IncompatibleQosStatus* writerStatus,
-              OpenDDS::DCPS::IncompatibleQosStatus* readerStatus);
+              OpenDDS::DCPS::IncompatibleQosStatus* writerStatus = 0,
+              OpenDDS::DCPS::IncompatibleQosStatus* readerStatus = 0);
 
 OpenDDS_Dcps_Export
 bool
 compatibleQOS(const DDS::PublisherQos * pubQos,
               const DDS::SubscriberQos * subQos,
-              OpenDDS::DCPS::IncompatibleQosStatus* writerStatus,
-              OpenDDS::DCPS::IncompatibleQosStatus* readerStatus);
+              OpenDDS::DCPS::IncompatibleQosStatus* writerStatus = 0,
+              OpenDDS::DCPS::IncompatibleQosStatus* readerStatus = 0);
 
 OpenDDS_Dcps_Export
 bool

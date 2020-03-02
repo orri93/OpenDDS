@@ -5,6 +5,8 @@
 
 #include "BaseMessageUtils.h"
 
+#include "dds/DCPS/Time_Helper.h"
+
 OPENDDS_BEGIN_VERSIONED_NAMESPACE_DECL
 
 namespace OpenDDS {
@@ -104,9 +106,18 @@ void locators_to_blob(const DCPS::LocatorSeq& locators,
   message_block_to_sequence(mb_locator, blob);
 }
 
+OpenDDS_Rtps_Export
+DCPS::LocatorSeq transport_locator_to_locator_seq(const DCPS::TransportLocator& info)
+{
+  DCPS::LocatorSeq locators;
+  blob_to_locators(info.data, locators);
+  return locators;
+}
+
 MessageParser::MessageParser(const ACE_Message_Block& in)
   : in_(in.duplicate())
   , ser_(in_.get(), false, DCPS::Serializer::ALIGN_CDR)
+  , header_()
   , sub_()
   , smContentStart_(0)
 {}
@@ -114,6 +125,7 @@ MessageParser::MessageParser(const ACE_Message_Block& in)
 MessageParser::MessageParser(const DDS::OctetSeq& in)
   : fromSeq_(reinterpret_cast<const char*>(in.get_buffer()), in.length())
   , ser_(&fromSeq_, false, DCPS::Serializer::ALIGN_CDR)
+  , header_()
   , sub_()
   , smContentStart_(0)
 {
@@ -122,8 +134,7 @@ MessageParser::MessageParser(const DDS::OctetSeq& in)
 
 bool MessageParser::parseHeader()
 {
-  Header hdr;
-  return ser_ >> hdr;
+  return ser_ >> header_;
 }
 
 bool MessageParser::parseSubmessageHeader()
@@ -139,7 +150,7 @@ bool MessageParser::parseSubmessageHeader()
   }
 
   smContentStart_ = ser_.length();
-  return true;
+  return sub_.submessageLength <= ser_.length();
 }
 
 bool MessageParser::hasNextSubmessage() const
@@ -157,6 +168,35 @@ bool MessageParser::skipToNextSubmessage()
 {
   const size_t read = smContentStart_ - ser_.length();
   return ser_.skip(static_cast<unsigned short>(sub_.submessageLength - read));
+}
+
+bool MessageParser::skipSubmessageContent()
+{
+  if (sub_.submessageLength) {
+    const size_t read = smContentStart_ - ser_.length();
+    return ser_.skip(static_cast<unsigned short>(sub_.submessageLength - read));
+  } else if (sub_.submessageId == PAD || sub_.submessageId == INFO_TS) {
+    return true;
+  } else {
+    return ser_.skip(static_cast<unsigned short>(ser_.length()));
+  }
+}
+
+DCPS::TimeDuration rtps_duration_to_time_duration(const Duration_t& rtps_duration, const ProtocolVersion_t& version, const VendorId_t& vendor)
+{
+  if (rtps_duration == DURATION_INFINITE) {
+    return DCPS::TimeDuration::max_value;
+  }
+
+  if (version < PROTOCOLVERSION_2_4 && vendor == VENDORID_OPENDDS) {
+    return OpenDDS::DCPS::TimeDuration(
+      rtps_duration.seconds,
+      static_cast<ACE_UINT32>(rtps_duration.fraction / 1000));
+  } else {
+    return OpenDDS::DCPS::TimeDuration(
+      rtps_duration.seconds,
+      DCPS::uint32_fractional_seconds_to_microseconds(rtps_duration.fraction));
+  }
 }
 
 }
